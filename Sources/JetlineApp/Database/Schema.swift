@@ -423,5 +423,11 @@ enum Schema {
                 t.add(column: "hideClosedWorkspaces", .boolean).notNull().defaults(to: false)
             }
         }
+
+        migrator.registerMigration("v30_low_git_performance") { db in
+            try db.alter(table: "app_settings") { t in
+                t.add(column: "lowGitPerformance", .boolean).notNull().defaults(to: true)
+            }
+        }
     }
 }

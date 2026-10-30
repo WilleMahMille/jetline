@@ -56,6 +56,8 @@ final class Engine {
 
     @ObservationIgnored private var diffRefreshTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var diffRefreshQueued: Set<String> = []
+    @ObservationIgnored private let diffGate = DiffRefreshGate()
+    @ObservationIgnored private var pendingDiffPollTask: Task<Void, Never>?
     @ObservationIgnored private(set) lazy var prTracker: PRTracker = PRTracker(state: self)
     @ObservationIgnored private(set) lazy var conversationStore: PRConversationLoader = PRConversationLoader(state: self)
     @ObservationIgnored private var hasLoaded = false
@@ -114,6 +116,7 @@ final class Engine {
         }
         prTracker.sync()
         startIdleSweep()
+        startPendingDiffPoll()
         if settings.restoreSessionsOnLaunch { restoreSessions() }
     }
 
@@ -1157,11 +1160,44 @@ final class Engine {
         await task.value
     }
 
+    /// Under "Low git performance", the watcher's refresh: one `rev-parse`,
+    /// and the full diff only when HEAD or the base moved.
+    private func refreshDiffIfCommitsMoved(_ workspace: Workspace) async {
+        let key = await DiffComputer.commitKey(worktreePath: workspace.worktreePath, baseBranch: workspace.baseBranch)
+        guard diffGate.commitsMoved(key, for: workspace.id) else { return }
+        await refreshDiff(for: workspace)
+    }
+
+    /// Picks up the working-tree writes that "Low git performance" left
+    /// pending, in workspaces that are open and awake.
+    private func startPendingDiffPoll() {
+        guard pendingDiffPollTask == nil else { return }
+        pendingDiffPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: DiffRefreshGate.pollInterval)
+                self?.refreshPendingDiffs()
+            }
+        }
+    }
+
+    private func refreshPendingDiffs() {
+        for id in diffGate.pending where watchers[id] != nil {
+            guard let workspace = workspaceById(id) else { continue }
+            Task { await refreshDiff(for: workspace) }
+        }
+    }
+
     private func performDiffRefresh(for workspace: Workspace) async {
         guard worktreeExists(for: workspace) else {
             handleMissingWorktree(workspace)
             return
         }
+        diffGate.refreshStarted(workspace.id)
+        let lowGit = settings.lowGitPerformance
+        async let commitKey: DiffCommitKey? = {
+            guard lowGit else { return nil }
+            return await DiffComputer.commitKey(worktreePath: workspace.worktreePath, baseBranch: workspace.baseBranch)
+        }()
         async let combined: DiffSnapshot? = {
             try? await DiffComputer.compute(worktreePath: workspace.worktreePath, baseBranch: workspace.baseBranch, mode: .combined)
         }()
@@ -1183,6 +1219,7 @@ final class Engine {
         }
         let dirty = await uncommitted
         if ws.hasUncommitted != dirty { ws.hasUncommitted = dirty }
+        diffGate.refreshed(workspace.id, at: await commitKey)
     }
 
     /// Single write path for PR snapshots; mirrored to disk so the next
@@ -1345,7 +1382,7 @@ final class Engine {
                   self.workspaceStates[id]?.isOpen == true else { return }
             var additional: [String] = []
             if let gitDir, gitDir != worktreePath { additional.append(gitDir) }
-            let watcher = WorktreeWatcher(worktreePath: worktreePath, additionalPaths: additional) { [weak self] in
+            let watcher = WorktreeWatcher(worktreePath: worktreePath, additionalPaths: additional) { [weak self] change in
                 guard let self, let ws = self.workspaceById(id) else { return }
                 // Worktree writes count as activity — a background agent
                 // still working keeps its workspace out of the idle sweep.
@@ -1353,7 +1390,16 @@ final class Engine {
                 if let gitDir, !WorktreeOps.hasActiveIndexWrite(worktreePath: worktreePath) {
                     WorktreeOps.removeStaleIndexLock(gitDir: gitDir)
                 }
-                Task { await self.refreshDiff(for: ws) }
+                if self.settings.lowGitPerformance {
+                    // Edits wait for the slow poll; only moved commits
+                    // redo the diff now. Git-dir writes alone (our own
+                    // `git status` refreshing the index) mark nothing.
+                    if change.workTree { self.diffGate.markPending(id) }
+                    guard change.gitDir else { return }
+                    Task { await self.refreshDiffIfCommitsMoved(ws) }
+                } else {
+                    Task { await self.refreshDiff(for: ws) }
+                }
                 // Likely a commit or push: wake the PR tracker.
                 self.prTracker.kick(workspaceId: id)
             }
@@ -1369,6 +1415,7 @@ final class Engine {
     func closeWorkspace(_ id: String) {
         watchers[id]?.stop()
         watchers.removeValue(forKey: id)
+        diffGate.forget(id)
         pausedWorkspaces.remove(id)
         if let ws = workspaceStates[id] {
             tearDownWorkspaceRuntime(ws)

@@ -64,6 +64,9 @@ struct AppSettings: Codable, Equatable, Sendable, FetchableRecord, PersistableRe
     /// List only workspaces with open tabs in the sidebar; the rest fold
     /// into a "hidden" row under each repository.
     var hideClosedWorkspaces: Bool = false
+    /// Redo a workspace's diff when its commit hashes (HEAD, base) move, and
+    /// pick up working-tree edits on a slow poll instead of every write.
+    var lowGitPerformance: Bool = true
 
     /// User overrides for the prompt sent to the agent for each action.
     /// Empty/nil falls back to `GitActionPrompts.defaults`.

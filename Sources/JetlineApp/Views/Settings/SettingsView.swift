@@ -52,6 +52,15 @@ private struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Low git performance", isOn: state.settingsBinding(\.lowGitPerformance))
+            } header: {
+                Text("Git")
+            } footer: {
+                Text("Redo a workspace's changes when its commits move (a commit, checkout or new base) and pick up uncommitted edits every 30 seconds, instead of running git on every file write. Fewer git processes while agents edit a lot.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .scrollIndicators(.visible)
