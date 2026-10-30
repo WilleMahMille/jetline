@@ -76,6 +76,9 @@ final class AppState: ObservableObject {
     /// Surfaces that currently want the ⌘⇧ navigation key equivalents
     /// released back to the text system.
     @Published private(set) var navShortcutSuppressors: Set<String> = []
+    /// Bumped by keyboard navigation between tabs and workspaces; the main
+    /// window then focuses the selected tab's terminal or chat input.
+    @Published private(set) var tabFocusRequest = 0
     /// Whether this Mac's engine has synced (settings come with it).
     var isSynced: Bool { localHost.isSynced }
 
@@ -1335,6 +1338,7 @@ final class AppState: ObservableObject {
               let idx = tabs.firstIndex(of: active) else { return }
         let next = (idx + (forward ? 1 : -1) + tabs.count) % tabs.count
         selectTab(tabs[next], in: wsId)
+        tabFocusRequest += 1
     }
 
     /// Move through already-open workspaces as a vertical axis.
@@ -1346,6 +1350,7 @@ final class AppState: ObservableObject {
         let idx = current ?? start
         let next = (idx + (forward ? 1 : -1) + ids.count) % ids.count
         selectWorkspace(ids[next])
+        tabFocusRequest += 1
     }
 
     private func loadedSidebarWorkspaceOrder() -> [String] {
