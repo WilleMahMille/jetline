@@ -64,7 +64,10 @@ enum AgentToolsServer {
     Use these tools instead of `git worktree` or `git checkout -b` when work should live on its own \
     branch: stack a new workspace on yours for a follow-up that should be its own pull request, or \
     create one off the default branch for unrelated work. You keep working where you are; nothing \
-    runs in a workspace you create, so leave a note saying what it's for. When the work spans another \
+    runs in a workspace you create until you start_session there, so leave a note saying what it's \
+    for. To dispatch work, start a session in each workspace you created with a complete brief, \
+    then wait_for_sessions and read_session to follow along, and send_message for follow-ups or \
+    instructions shared by several sessions. When the work spans another \
     repository added to Jetline (say, a backend change a frontend feature needs), find it with \
     list_repositories and create the workspace there instead of cloning or editing its checkout. \
     Always give workspaces very short kebab-case names, one to three words, e.g. "settings-screen".
