@@ -379,7 +379,7 @@ final class JSONLineProcess: @unchecked Sendable {
                 lock.withLock {
                     stderrBuffer.append(contentsOf: buffer[0..<n])
                     if stderrBuffer.count > Self.stderrTailLength {
-                        stderrBuffer.removeFirst(stderrBuffer.count - Self.stderrTailLength)
+                        stderrBuffer.removePrefix(stderrBuffer.count - Self.stderrTailLength)
                     }
                 }
             } else if n < 0, errno == EINTR {

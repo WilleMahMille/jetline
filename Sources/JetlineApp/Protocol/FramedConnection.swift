@@ -58,6 +58,9 @@ final class FramedConnection: @unchecked Sendable {
     private var preamble: Data?
     private let lock = NSLock()
     private var closed = false
+    /// A write failed (or was abandoned): the stream is cut mid-frame, so
+    /// the rest of the queue is dropped. Write queue only.
+    private var writeFailed = false
     private var _pendingWriteBytes = 0
 
     /// Called on the read queue with every complete frame read in one drain.
@@ -113,7 +116,12 @@ final class FramedConnection: @unchecked Sendable {
         guard !closed else { return }
         _pendingWriteBytes += size
         writeQueue.async { [self] in
-            let failure = writeAll(fd: writeFD, bytes)
+            // Once closed, a peer that takes nothing for a poll interval
+            // has stopped reading (a laptop asleep on a live ssh link):
+            // waiting on it would pin the backlog and the socket until TCP
+            // gives up, hours later.
+            let failure = writeFailed ? nil : writeAll(fd: writeFD, bytes, giveUp: { [self] in isClosed })
+            if failure != nil { writeFailed = true }
             let drained: Bool = lock.withLock {
                 _pendingWriteBytes -= size
                 if _pendingWriteBytes > drainThreshold { wasBacklogged = true }
